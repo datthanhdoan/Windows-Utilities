@@ -1,4 +1,24 @@
 @echo off
+rem =========================================================
+rem APK INSTALLER TOOL
+rem
+rem Requirements:
+rem 1. adb must be installed (mandatory)
+rem    - Used for device connection and APK installation
+rem 2. aapt is optional
+rem    - Used for extracting APK information
+rem    - If not available, some features will be limited
+rem 3. Android device must be:
+rem    - Connected via USB
+rem    - USB debugging enabled
+rem    - Authorized on the device
+rem =========================================================
+
+rem Configuration - Update these paths according to your environment:
+set "adb_path=D:\Env\platform-tools\adb.exe"
+set "aapt_path=D:\UnityEditor\2022.3.52f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\build-tools\35.0.0\aapt.exe"
+set "apk_path=path\to\your.apk"
+
 setlocal EnableDelayedExpansion
 cls
 
@@ -140,52 +160,39 @@ echo.
 :: Check if package is already installed.
 if defined pkg (
   "%adb_path%" -s %device% shell pm list packages --user 0 | findstr /i "!pkg!" >nul 2>&1
-  if %errorlevel%==0 (
+  if !errorlevel! == 0 (
     echo %HIGHLIGHT%------------------------------------------------------%RESET%
     echo %HIGHLIGHT%  [Override] Package already installed  %RESET%
-    :: Retrieve installed package info.
-    set "pkg_info_file=%TEMP%\pkg_info.txt"
-    if exist "%pkg_info_file%" del /F /Q "%pkg_info_file%"
-    "%adb_path%" -s %device% shell dumpsys package --user 0 !pkg! > "%pkg_info_file%"
     
-    if not exist "%pkg_info_file%" (
-      set "installed_version=N/A"
-      set "installed_vcode=N/A"
-      ) else (
-      :: Extract installed versionName.
-      set "installed_version=N/A"
-      for /f "tokens=*" %%L in ('findstr /ri "versionName=" "%pkg_info_file%"') do (
-        for /f "tokens=2 delims== " %%X in ("%%L") do (
-          for /f "tokens=1" %%Y in ("%%X") do set "installed_version=%%Y"
-        )
-        goto :gotInstalledVersion
-      )
-      :gotInstalledVersion
-      if not defined installed_version set "installed_version=N/A"
-      
-      :: Extract installed versionCode.
-      set "installed_vcode=N/A"
-      for /f "tokens=*" %%L in ('findstr /ri "versionCode=" "%pkg_info_file%"') do (
-        for /f "tokens=2 delims== " %%X in ("%%L") do (
-          for /f "tokens=1" %%Y in ("%%X") do set "installed_vcode=%%Y"
-        )
-        goto :gotInstalledVcode
-      )
-      :gotInstalledVcode
-      if not defined installed_vcode set "installed_vcode=N/A"
-    )
-    if exist "%pkg_info_file%" del /F /Q "%pkg_info_file%"
+    :: Dump package info from device.
+    "%adb_path%" -s !device! shell dumpsys package !pkg! > "%TEMP%\dumpsys_output.txt"
     
-    echo %INFO%Existing Version Name: %RESET%  !installed_version!
-    echo %INFO%Existing Version Code: %RESET%  !installed_vcode!
-    echo %INFO%New APK Version Name:  %RESET%  !vname!
-    echo %INFO%New APK Version Code:  %RESET%  !vcode!
-    echo %HIGHLIGHT%------------------------------------------------------%RESET%
-    ) else (
+    :: Parse versionName
+    for /f "tokens=2 delims==' " %%A in ('findstr /i "versionName" "%TEMP%\dumpsys_output.txt"') do set "installed_version=%%A"
+    :: Parse versionCode
+    for /f "tokens=2 delims== " %%B in ('findstr /i "versionCode" "%TEMP%\dumpsys_output.txt"') do set "installed_vcode=%%B"
+    del /F /Q "%TEMP%\dumpsys_output.txt"
+    
+    set "PAD20=                    "
+    set "installed_version_padded=!installed_version!!PAD20!"
+    set "installed_version_padded=!installed_version_padded:~0,20!"
+    set "vname_padded=!vname!!PAD20!"
+    set "vname_padded=!vname_padded:~0,20!"
+    set "installed_vcode_padded=!installed_vcode!!PAD20!"
+    set "installed_vcode_padded=!installed_vcode_padded:~0,20!"
+    set "vcode_padded=!vcode!!PAD20!"
+    set "vcode_padded=!vcode_padded:~0,20!"
+    
+    echo %INFO%^| Field          ^| Existing Value      ^| New Value           ^|%RESET%
+    echo %INFO%+---------------+--------------------+--------------------+%RESET%
+    echo %INFO%^| Version Name  ^| !installed_version_padded!  ^| !vname_padded!  ^|%RESET%
+    echo %INFO%^| Version Code  ^| !installed_vcode_padded!  ^| !vcode_padded!  ^|%RESET%
+    echo %INFO%+---------------+--------------------+--------------------+%RESET%
+  ) else (
     echo %INFO%Package !pkg! is not installed. Proceeding with fresh installation.%RESET%
   )
   echo.
-  ) else (
+) else (
   echo %INFO%Skipping package override check due to missing APK details.%RESET%
   echo.
 )
@@ -194,8 +201,7 @@ if defined pkg (
 echo %INFO%Installing APK on device:%RESET% %friendlyDevice% (ID: %device%)...
 set "log_file=%TEMP%\adb_install.log"
 if exist "%log_file%" del /F /Q "%log_file%"
-
-start "" /B cmd /c ""%adb_path%" -s %device% install -r "%apk_path%" > "%log_file%" 2>&1"
+start "" /B cmd /c "%adb_path% -s %device% install -r "%apk_path%" > "%log_file%" 2>&1"
 
 :: Spinner loop.
 set "spinner=\|/-"
