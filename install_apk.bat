@@ -2,169 +2,218 @@
 setlocal EnableDelayedExpansion
 cls
 
-:: Set window title (optional)
+:: Set window title
 title APK Installer Tool
 
-:: ------------------------------------------------------------
-:: Retrieve ANSI escape character (ESC) for dynamic UI updates.
-:: ------------------------------------------------------------
+:: Retrieve ANSI escape character for dynamic UI updates.
 for /F "delims=" %%a in ('echo prompt $E^| cmd') do set "ESC=%%a"
 
-:: ------------------------------------------------------------
-:: Define ANSI color variables (using not-too-bright colors)
-:: ------------------------------------------------------------
+:: Define ANSI color variables
 set "RESET=%ESC%[0m"
-set "INFO=%ESC%[36m"         & rem Cyan
-set "SUCCESS=%ESC%[32m"      & rem Green
-set "ERROR=%ESC%[31m"        & rem Red
-set "HIGHLIGHT=%ESC%[33m"    & rem Yellow
+set "INFO=%ESC%[36m"
+set "SUCCESS=%ESC%[32m"
+set "ERROR=%ESC%[31m"
+set "HIGHLIGHT=%ESC%[33m"
 
-:: ============================================================
-::                   APK INSTALLER TOOL
-:: ============================================================
-echo %HIGHLIGHT%******************************************************%RESET%
-echo %HIGHLIGHT%              APK INSTALLER TOOL                %RESET%
-echo %HIGHLIGHT%******************************************************%RESET%
+:: Header
+echo %HIGHLIGHT%======================================================%RESET%
+echo %HIGHLIGHT%  APK INSTALLER TOOL  %RESET%
+echo %HIGHLIGHT%======================================================%RESET%
 echo.
 
-:: ------------------------------------------------------------
 :: Check input parameter for APK file.
-:: ------------------------------------------------------------
 if "%~1"=="" (
-    echo %ERROR%[Error]%RESET% No APK file path provided.
-    echo %INFO%Usage:%RESET% install_apk.bat "path\to\your.apk"
-    pause
-    exit /b
+  echo %ERROR%[Error]%RESET% No APK file path provided.
+  echo %INFO%Usage:%RESET% install_apk.bat "path\to\your.apk"
+  pause
+  exit /b
 )
 set "apk_path=%~1"
 if not exist "%apk_path%" (
-    echo %ERROR%[Error]%RESET% APK file not found: "%apk_path%"
-    pause
-    exit /b
+  echo %ERROR%[Error]%RESET% APK file not found: "%apk_path%"
+  pause
+  exit /b
 )
 
-:: ------------------------------------------------------------
 :: Set path to adb.exe (update if needed)
-:: ------------------------------------------------------------
 set "adb_path=D:\Env\platform-tools\adb.exe"
 if not exist "%adb_path%" (
-    echo %ERROR%[Error]%RESET% adb.exe not found at "%adb_path%". Please verify the path.
-    pause
-    exit /b
+  echo %ERROR%[Error]%RESET% adb.exe not found at "%adb_path%". Please verify the path.
+  pause
+  exit /b
 )
 
-:: ------------------------------------------------------------
 :: Check for connected Android device.
-:: ------------------------------------------------------------
 echo %INFO%Checking for connected Android devices...%RESET%
 set "device="
 for /f "skip=1 tokens=1,2" %%A in ('"%adb_path%" devices') do (
-    if /I "%%B"=="device" (
-         set "device=%%A"
-         goto :device_found
-    )
+  if /I "%%B"=="device" (
+    set "device=%%A"
+    goto :device_found
+  )
 )
 :device_found
 if not defined device (
-    echo %ERROR%[Error]%RESET% No Android device found.
-    echo %INFO%Please connect a device and enable USB debugging.%RESET%
-    pause
-    exit /b
+  echo %ERROR%[Error]%RESET% No Android device found.
+  echo %INFO%Please connect a device and enable USB debugging.%RESET%
+  pause
+  exit /b
 )
 
-:: ------------------------------------------------------------
-:: Retrieve device properties for friendly display.
-:: ------------------------------------------------------------
+:: Retrieve device properties.
 for /f "delims=" %%b in ('"%adb_path%" -s %device% shell getprop ro.product.manufacturer') do set "manufacturer=%%b"
 for /f "delims=" %%c in ('"%adb_path%" -s %device% shell getprop ro.product.model') do set "model=%%c"
 for /f "delims=" %%d in ('"%adb_path%" -s %device% shell getprop ro.config.marketing_name') do set "marketingName=%%d"
 if "%manufacturer%"=="" set "manufacturer=UnknownManufacturer"
 if "%model%"=="" set "model=UnknownModel"
 if not "%marketingName%"=="" (
-    set "friendlyDevice=%marketingName%"
-) else (
-    set "friendlyDevice=%manufacturer% %model%"
+  set "friendlyDevice=%marketingName%"
+  ) else (
+  set "friendlyDevice=%manufacturer% %model%"
 )
 
 echo.
 echo %HIGHLIGHT%Device found:%RESET% %friendlyDevice% (ID: %device%)
 echo.
 
-:: ------------------------------------------------------------
 :: Retrieve APK info using aapt.exe if available.
-:: ------------------------------------------------------------
-set "aapt_path=D:\Env\platform-tools\aapt.exe"
-if exist "%aapt_path%" (
-    for /f "tokens=1-6 delims=' " %%a in ('"%aapt_path%" dump badging "%apk_path%" ^| findstr "package:"') do (
-        set "dummy=%%a"
-        set "pkg=%%b"
-        set "dummy2=%%c"
-        set "vcode=%%d"
-        set "dummy3=%%e"
-        set "vname=%%f"
-    )
-    echo %HIGHLIGHT%APK Information:%RESET%
-    echo    %HIGHLIGHT%Package Name%RESET% : %pkg%
-    echo    %HIGHLIGHT%Version%RESET%      : %vname%
-    echo.
-) else (
-    echo %INFO%[Notice]%RESET% aapt.exe not found at "%aapt_path%". Skipping APK detail extraction.
-    echo.
-    set "pkg="
-    set "vname="
+set "aapt_path=D:\UnityEditor\2022.3.52f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\build-tools\35.0.0\aapt.exe"
+
+:: Ensure previous temporary files are deleted.
+if exist "%TEMP%\temp_apk_file.tmp" del /F /Q "%TEMP%\temp_apk_file.tmp"
+if exist "%TEMP%\aapt_debug.log" del /F /Q "%TEMP%\aapt_debug.log"
+
+set "temp_apk=%TEMP%\temp_apk_file.tmp"
+copy /Y "%apk_path%" "%temp_apk%" >nul
+if not exist "%temp_apk%" (
+  echo %ERROR%[Error]%RESET% Failed to create temporary file: "%temp_apk%"
+  pause
+  exit /b
 )
 
-:: ------------------------------------------------------------
-:: If APK package info is available, check if the package is already installed.
-:: ------------------------------------------------------------
+:: Dump aapt.exe output into a debug file.
+set "debug_file=%TEMP%\aapt_debug.log"
+"%aapt_path%" dump badging "%temp_apk%" > "%debug_file%" 2>&1
+
+:: Read the debug file to find the line containing "package:".
+set "line="
+for /f "usebackq tokens=*" %%L in ("%debug_file%") do (
+  echo %%L | findstr /c:"package:" >nul
+  if not errorlevel 1 (
+    set "line=%%L"
+    goto :gotLine
+  )
+)
+:gotLine
+
+:: Delete temporary files.
+del /F /Q "%temp_apk%"
+del /F /Q "%debug_file%"
+
+:: If no line was found, report error.
+if not defined line (
+  echo %ERROR%[Error]%RESET% Failed to extract package info from aapt output.
+  goto afterExtract
+)
+
+:: Process the captured line.
+:: Expected format:
+:: package: name='com.bus.chaos.parking.jam' versionCode='33' versionName='1.0.7.2' ...
+for /f "tokens=3,5,7 delims=' " %%a in ("!line!") do (
+  set "pkg=%%a"
+  set "vcode=%%b"
+  set "vname=%%c"
+)
+
+:afterExtract
+
+:: Display APK Information.
+echo %HIGHLIGHT%------------------------------------------------------%RESET%
+echo %HIGHLIGHT%  APK INFORMATION  %RESET%
+echo %HIGHLIGHT%------------------------------------------------------%RESET%
+echo.
+echo %INFO%Package Name:  %RESET%  !pkg!
+echo %INFO%APK Version:  %RESET%  !vname!
+echo %INFO%Version Code:  %RESET%  !vcode!
+echo.
+
+:: Check if package is already installed.
 if defined pkg (
-    "%adb_path%" -s %device% shell pm list packages | findstr /i "%pkg%" >nul 2>&1
-    if %errorlevel%==0 (
-        echo %HIGHLIGHT%[Override]%RESET% Package %pkg% is already installed.
-        for /f "tokens=*" %%i in ('"%adb_path%" -s %device% shell dumpsys package %pkg% ^| findstr "versionName"') do (
-             set "installed_version=%%i"
+  "%adb_path%" -s %device% shell pm list packages --user 0 | findstr /i "!pkg!" >nul 2>&1
+  if %errorlevel%==0 (
+    echo %HIGHLIGHT%------------------------------------------------------%RESET%
+    echo %HIGHLIGHT%  [Override] Package already installed  %RESET%
+    :: Retrieve installed package info.
+    set "pkg_info_file=%TEMP%\pkg_info.txt"
+    if exist "%pkg_info_file%" del /F /Q "%pkg_info_file%"
+    "%adb_path%" -s %device% shell dumpsys package --user 0 !pkg! > "%pkg_info_file%"
+    
+    if not exist "%pkg_info_file%" (
+      set "installed_version=N/A"
+      set "installed_vcode=N/A"
+      ) else (
+      :: Extract installed versionName.
+      set "installed_version=N/A"
+      for /f "tokens=*" %%L in ('findstr /ri "versionName=" "%pkg_info_file%"') do (
+        for /f "tokens=2 delims== " %%X in ("%%L") do (
+          for /f "tokens=1" %%Y in ("%%X") do set "installed_version=%%Y"
         )
-        for /f "tokens=2 delims==" %%i in ("%installed_version%") do set "installed_version=%%i"
-        echo    %HIGHLIGHT%Installed Version:%RESET% %installed_version%
-        echo    %HIGHLIGHT%New APK Version:%RESET%   %vname%
-    ) else (
-        echo %INFO%Package %pkg% is not installed. Proceeding with fresh installation.%RESET%
+        goto :gotInstalledVersion
+      )
+      :gotInstalledVersion
+      if not defined installed_version set "installed_version=N/A"
+      
+      :: Extract installed versionCode.
+      set "installed_vcode=N/A"
+      for /f "tokens=*" %%L in ('findstr /ri "versionCode=" "%pkg_info_file%"') do (
+        for /f "tokens=2 delims== " %%X in ("%%L") do (
+          for /f "tokens=1" %%Y in ("%%X") do set "installed_vcode=%%Y"
+        )
+        goto :gotInstalledVcode
+      )
+      :gotInstalledVcode
+      if not defined installed_vcode set "installed_vcode=N/A"
     )
-    echo.
-) else (
-    echo %INFO%Skipping package override check due to missing APK details.%RESET%
-    echo.
+    if exist "%pkg_info_file%" del /F /Q "%pkg_info_file%"
+    
+    echo %INFO%Existing Version Name: %RESET%  !installed_version!
+    echo %INFO%Existing Version Code: %RESET%  !installed_vcode!
+    echo %INFO%New APK Version Name:  %RESET%  !vname!
+    echo %INFO%New APK Version Code:  %RESET%  !vcode!
+    echo %HIGHLIGHT%------------------------------------------------------%RESET%
+    ) else (
+    echo %INFO%Package !pkg! is not installed. Proceeding with fresh installation.%RESET%
+  )
+  echo.
+  ) else (
+  echo %INFO%Skipping package override check due to missing APK details.%RESET%
+  echo.
 )
 
-:: ------------------------------------------------------------
-:: Start APK installation and create temporary log file.
-:: ------------------------------------------------------------
+:: Install APK.
 echo %INFO%Installing APK on device:%RESET% %friendlyDevice% (ID: %device%)...
 set "log_file=%TEMP%\adb_install.log"
-if exist "%log_file%" del "%log_file%"
+if exist "%log_file%" del /F /Q "%log_file%"
 
-:: Execute adb install with -r flag to replace/override if needed.
 start "" /B cmd /c ""%adb_path%" -s %device% install -r "%apk_path%" > "%log_file%" 2>&1"
 
-:: ------------------------------------------------------------
-:: Spinner loop: display spinner animation while waiting for installation.
-:: ------------------------------------------------------------
+:: Spinner loop.
 set "spinner=\|/-"
 set /a index=0
 
 :spinner_loop
-    rem Check if installation succeeded or failed.
-    findstr /C:"Success" "%log_file%" >nul 2>&1 && goto install_success
-    findstr /C:"Failure" "%log_file%" >nul 2>&1 && goto install_failure
+rem Check installation status.
+findstr /C:"Success" "%log_file%" >nul 2>&1 && goto install_success
+findstr /C:"Failure" "%log_file%" >nul 2>&1 && goto install_failure
 
-    rem Check if device is still connected.
-    "%adb_path%" -s %device% get-state >nul 2>&1
-    if errorlevel 1 goto device_disconnected
+rem Check if device is still connected.
+"%adb_path%" -s %device% get-state >nul 2>&1
+if errorlevel 1 goto device_disconnected
 
-    set /a index=(index+1) %% 4
-    set "char=!spinner:~%index%,1!"
-    <nul set /p ="%ESC%[2K%ESC%[1G%INFO%Installing... !char! (Device: %friendlyDevice%)%RESET%"
-    ping -n 1 -w 300 127.0.0.1 >nul
+set /a index=(index+1) %% 4
+set "char=!spinner:~%index%,1!"
+<nul set /p ="%ESC%[2K%ESC%[1G%INFO%Installing... !char! (Device: %friendlyDevice%)%RESET%"
+ping -n 1 -w 300 127.0.0.1 >nul
 goto spinner_loop
 
 :install_success
