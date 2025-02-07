@@ -15,26 +15,8 @@ rem    - Authorized on the device
 rem =========================================================
 
 rem Configuration - Update these paths according to your environment:
-rem Tự động tìm đường dẫn adb.exe
-set "adb_path="
-for /f "delims=" %%i in ('where.exe adb 2^>nul') do (
-  if not defined adb_path set "adb_path=%%i"
-)
-if not defined adb_path (
-  echo %ERROR%[Error]%RESET% Không tìm thấy adb.exe trong PATH. Vui lòng cài đặt Android Platform Tools.
-  pause
-  exit /b
-)
-
-rem Tự động tìm đường dẫn aapt.exe (optional)
-set "aapt_path="
-for /f "delims=" %%i in ('where.exe aapt 2^>nul') do (
-  if not defined aapt_path set "aapt_path=%%i"
-)
-if not defined aapt_path (
-  echo %INFO%[Thông báo]%RESET% Không tìm thấy aapt.exe, một số tính năng sẽ bị hạn chế.
-)
-
+set "adb_path=D:\Env\platform-tools\adb.exe"
+set "aapt_path=D:\UnityEditor\2022.3.52f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\build-tools\35.0.0\aapt.exe"
 set "apk_path=path\to\your.apk"
 
 setlocal EnableDelayedExpansion
@@ -114,7 +96,6 @@ echo %HIGHLIGHT%Device found:%RESET% %friendlyDevice% (ID: %device%)
 echo.
 
 :: Retrieve APK info using aapt.exe if available.
-
 :: Ensure previous temporary files are deleted.
 if exist "%TEMP%\temp_apk_file.tmp" del /F /Q "%TEMP%\temp_apk_file.tmp"
 if exist "%TEMP%\aapt_debug.log" del /F /Q "%TEMP%\aapt_debug.log"
