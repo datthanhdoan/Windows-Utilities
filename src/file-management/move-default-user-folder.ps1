@@ -1,41 +1,57 @@
-# Kiểm tra quyền Administrator
+# Check for Administrator privileges
 if (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator"))
 {
-    Write-Warning "Chạy script với quyền Administrator!"
+    Write-Warning "Please run this script as Administrator!"
     Break
 }
 
-# --- Nhập các tùy chọn tương tác từ người dùng ---
-$targetDrive = Read-Host "Nhập phân vùng đích (mặc định: X:)"
+# --- User Input Options ---
+$targetDrive = Read-Host "Enter target drive (default: X:)"
 if ([string]::IsNullOrEmpty($targetDrive)) { $targetDrive = "X:" }
 
-$operationInput = Read-Host "Chọn thao tác cho nội dung (Move/Copy) (mặc định: Move)"
+# Ensure target drive is in proper format (e.g., "X:")
+if ($targetDrive -notmatch "^[A-Za-z]:$") {
+    $targetDrive = $targetDrive.TrimEnd(":") + ":"
+}
+
+# Check if the drive exists
+if (-not (Test-Path $targetDrive)) {
+    Write-Warning "Target drive '$targetDrive' does not exist. Exiting..."
+    Break
+}
+
+$operationInput = Read-Host "Choose content operation (Move/Copy) (default: Move)"
 if ([string]::IsNullOrEmpty($operationInput)) { $operationInput = "Move" }
 if ($operationInput -notin @("Move", "Copy")) {
-    Write-Host "Giá trị không hợp lệ, mặc định là Move."
+    Write-Host "Invalid value. Defaulting to Move."
     $operationInput = "Move"
 }
 $operation = $operationInput
 
-$simulateInput = Read-Host "Chạy ở chế độ simulation? (y/n) (mặc định: n)"
+$simulateInput = Read-Host "Run in simulation mode? (y/n) (default: n)"
 if ([string]::IsNullOrEmpty($simulateInput)) { $simulateInput = "n" }
 $simulate = $simulateInput -match "^(y|Y)"
 
-$restartInput = Read-Host "Restart Explorer sau khi hoàn tất? (y/n) (mặc định: y)"
+$restartInput = Read-Host "Restart Explorer after completion? (y/n) (default: y)"
 if ([string]::IsNullOrEmpty($restartInput)) { $restartInput = "y" }
 $restartExplorer = $restartInput -match "^(y|Y)"
 
-Write-Host "`n=== Các tùy chọn đã chọn ==="
-Write-Host "Phân vùng đích: $targetDrive"
-Write-Host "Thao tác nội dung: $operation"
-Write-Host "Chế độ Simulation: $simulate"
-Write-Host "Restart Explorer sau khi hoàn tất: $restartExplorer"
-Write-Host "=============================`n"
+# Display selected options with a nicer UI
+Write-Host ""
+Write-Host "==================================="
+Write-Host "        Selected Options         " -ForegroundColor Cyan
+Write-Host "-----------------------------------"
+Write-Host "Target Drive          : $targetDrive"
+Write-Host "Content Operation     : $operation"
+Write-Host "Simulation Mode       : $simulate"
+Write-Host "Restart Explorer      : $restartExplorer"
+Write-Host "==================================="
+Write-Host ""
 
-# Xác định đường dẫn cơ sở mới theo phân vùng đích
+# Define the base path on the target drive
 $BasePath = Join-Path $targetDrive "Home"
 
-# Định nghĩa các folder cần di chuyển cùng thuộc tính (GUID, icon, …)
+# Define special folders along with their attributes
 $UserFolders = @{
     'Desktop' = @{
         KnownFolderId        = '{B4BFCC3A-DB2C-424C-B029-7FE99A87C641}'
@@ -81,7 +97,7 @@ $UserFolders = @{
     }
 }
 
-# Load Windows API (để gọi hàm SHSetKnownFolderPath)
+# Load Windows API (to call SHSetKnownFolderPath)
 $code = @'
 using System;
 using System.Runtime.InteropServices;
@@ -93,7 +109,7 @@ public class KnownFolders {
 '@
 Add-Type -TypeDefinition $code
 
-# Hàm cập nhật icon và thuộc tính cho folder
+# Function to update folder icon and properties
 function Update-FolderIcon {
     param (
         [string]$FolderPath,
@@ -103,19 +119,19 @@ function Update-FolderIcon {
     
     try {
         if ($simulate) {
-            Write-Host "[Simulation] Sẽ tạo folder và cập nhật desktop.ini tại $FolderPath"
+            Write-Host "[Simulation] Would create folder and update desktop.ini at: $FolderPath" -ForegroundColor Yellow
             return
         }
         
-        # Tạo folder nếu chưa tồn tại
+        # Create folder if it doesn't exist
         if (-not (Test-Path $FolderPath)) {
             New-Item -Path $FolderPath -ItemType Directory -Force | Out-Null
         }
 
-        # Đặt thuộc tính System cho folder
+        # Set system attribute for the folder
         attrib.exe +S $FolderPath
 
-        # Tạo nội dung cho desktop.ini
+        # Prepare desktop.ini content
         $iniContent = @"
 [.ShellClassInfo]
 IconResource=$IconResource
@@ -126,17 +142,17 @@ IconIndex=0
         $desktopIniPath = Join-Path $FolderPath "desktop.ini"
         $iniContent | Out-File -FilePath $desktopIniPath -Encoding Unicode -Force
         
-        # Đặt thuộc tính System và Hidden cho desktop.ini
+        # Set system and hidden attributes for desktop.ini
         attrib.exe +S +H $desktopIniPath
         
-        Write-Host "Đã cập nhật icon và thuộc tính cho $FolderPath"
+        Write-Host "Updated icon and properties for: $FolderPath" -ForegroundColor Green
     }
     catch {
-        Write-Warning "Không thể cập nhật icon cho $FolderPath. Lỗi: $($_.Exception.Message)"
+        Write-Warning "Could not update icon for $FolderPath. Error: $($_.Exception.Message)"
     }
 }
 
-# Hàm lấy đường dẫn gốc của folder dựa trên SpecialFolder
+# Function to get the original path of the folder based on SpecialFolder
 function Get-OriginalPath {
     param (
         [string]$FolderName,
@@ -152,45 +168,58 @@ function Get-OriginalPath {
     }
 }
 
-# Hàm di chuyển (hoặc sao chép) folder đã được chuyển sang đường dẫn mới
+# Function to move (or copy) the folder's content to the new location
 function Move-KnownFolder {
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$FolderName,
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$NewPath
     )
     
     try {
-        # Lấy GUID của folder
+        # Get the folder GUID from configuration
         $Guid = [System.Guid]::Parse($UserFolders[$FolderName].KnownFolderId)
         
+        # Check and create new folder if it doesn't exist
+        if (-not (Test-Path $NewPath)) {
+            if ($simulate) {
+                Write-Host "[Simulation] Would create folder: $NewPath" -ForegroundColor Yellow
+            }
+            else {
+                New-Item -Path $NewPath -ItemType Directory -Force | Out-Null
+                Write-Host "Created folder: $NewPath" -ForegroundColor Green
+            }
+        }
+        
+        # Update the folder path using Windows API
         if ($simulate) {
-            Write-Host "[Simulation] Sẽ cập nhật đường dẫn của folder $FolderName sang $NewPath"
+            Write-Host "[Simulation] Would update path for folder '$FolderName' to: $NewPath" -ForegroundColor Yellow
         }
         else {
-            # Gọi API để cập nhật đường dẫn folder
             $result = [KnownFolders]::SHSetKnownFolderPath([ref]$Guid, 0, [IntPtr]::Zero, $NewPath)
             if ($result -ne 0) {
-                Write-Warning "Không thể cập nhật đường dẫn của folder $FolderName. Mã lỗi: $result"
+                Write-Warning "Could not update path for folder '$FolderName'. Error code: $result"
                 return
             }
         }
         
-        Write-Host "Đã cập nhật thành công đường dẫn cho folder $FolderName sang $NewPath"
+        Write-Host "Successfully updated path for folder '$FolderName' to: $NewPath" -ForegroundColor Green
         
-        # Cập nhật icon và thuộc tính cho folder mới
+        # Update the icon and properties for the new folder
         Update-FolderIcon -FolderPath $NewPath `
                           -IconResource $UserFolders[$FolderName].IconResource `
                           -LocalizedResourceId $UserFolders[$FolderName].LocalizedResourceId
         
-        # Lấy đường dẫn gốc của folder cần di chuyển nội dung
+        # Get the original folder path to move content from
         $oldPath = Get-OriginalPath -FolderName $FolderName -SpecialFolder $UserFolders[$FolderName].SpecialFolder
         
         if (Test-Path $oldPath) {
-            Write-Host "Đang thực hiện $operation nội dung từ $oldPath sang $NewPath..."
+            Write-Host "Performing '$operation' operation:" -ForegroundColor Cyan
+            Write-Host "  Source     : $oldPath"
+            Write-Host "  Destination: $NewPath"
             if ($simulate) {
-                Write-Host "[Simulation] Sẽ $operation các file (trừ desktop.ini) từ $oldPath sang $NewPath"
+                Write-Host "[Simulation] Would $operation files (excluding desktop.ini) from $oldPath to $NewPath" -ForegroundColor Yellow
             }
             else {
                 $items = Get-ChildItem -Path $oldPath -Force | Where-Object { $_.Name -ne "desktop.ini" }
@@ -201,43 +230,42 @@ function Move-KnownFolder {
                     elseif ($operation -eq "Copy") {
                         $items | Copy-Item -Destination $NewPath -Recurse -Force -ErrorAction Stop
                     }
-                    Write-Host "Đã $operation nội dung từ $oldPath sang $NewPath"
+                    Write-Host "$operation operation completed from $oldPath to $NewPath" -ForegroundColor Green
                     
-                    # --- Ý tưởng mở rộng: ---
-                    # Sau khi di chuyển, bạn có thể kiểm tra nếu folder cũ rỗng và xóa nó.
+                    # Optional: Remove the original folder if empty
                     # if ((Get-ChildItem -Path $oldPath -Force | Measure-Object).Count -eq 0) {
                     #     Remove-Item -Path $oldPath -Force
-                    #     Write-Host "Folder cũ $oldPath đã được xóa vì không còn nội dung."
+                    #     Write-Host "Original folder $oldPath has been removed as it is empty." -ForegroundColor Green
                     # }
                 }
                 else {
-                    Write-Host "Không có nội dung nào cần $operation tại $oldPath"
+                    Write-Host "No content found to $operation in: $oldPath" -ForegroundColor Yellow
                 }
             }
         }
         else {
-            Write-Warning "Không tìm thấy folder gốc: $oldPath"
+            Write-Warning "Original folder not found: $oldPath"
         }
     }
     catch {
-        Write-Error "Lỗi khi xử lý folder $FolderName. Chi tiết: $($_.Exception.Message)"
+        Write-Error "Error processing folder '$FolderName'. Details: $($_.Exception.Message)"
     }
 }
 
-# Di chuyển (hoặc sao chép) các folder đã định nghĩa
+# Process each defined folder
 foreach ($folder in $UserFolders.Keys) {
     Move-KnownFolder -FolderName $folder -NewPath $UserFolders[$folder].NewPath
 }
 
-Write-Host "Hoàn tất di chuyển các folder!"
+Write-Host "`nFolder relocation completed!" -ForegroundColor Magenta
 
-# Restart Explorer nếu người dùng chọn restart
+# Restart Explorer if chosen
 if ($restartExplorer) {
     if ($simulate) {
-        Write-Host "[Simulation] Sẽ restart Explorer."
+        Write-Host "[Simulation] Would restart Explorer." -ForegroundColor Yellow
     }
     else {
-        Write-Host "Restarting Explorer..."
+        Write-Host "Restarting Explorer..." -ForegroundColor Cyan
         Stop-Process -Name "explorer" -Force -ErrorAction SilentlyContinue
         Start-Process "explorer.exe"
     }
